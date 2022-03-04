@@ -1,0 +1,224 @@
+Look at correlations between each pair of marker + celltypes for Latent and Active groups independently
+Use the mean data from: df_summary
+
+4 plots, CD4/Macro and Latent/Active
++ 2 more for Treg in the supplementary
+```{r}
+# Use df_summary
+corr_input_marker = lapply(unique(df_summary$Split1), function(spt){
+  out1 = lapply(unique(df_summary$Split2), function(spt2){
+    df = df_summary[df_summary$Split1 %in% spt,]
+    df = df[df$Split2 %in% spt2,]
+    df = df[df$Marker %in% unique(df_summary$Marker)[c(2,4:33)],]
+    out2 = do.call(cbind, lapply(unique(df$Marker), function(marker){
+      df_out = df[df$Marker %in% marker,]
+      out3 = data.frame(df_out$Expr)
+      colnames(out3) = marker
+      rownames(out3) = df_out$Distance
+      return(out3)
+    }))
+  })
+  names(out1) = unique(df_summary$Split2)
+  return(out1)
+})
+names(corr_input_marker) = unique(df_summary$Split1)
+
+# Use df_summary
+corr_input_celltype = lapply(unique(df_summary$Split1), function(spt){
+  out1 = lapply(unique(df_summary$Split2), function(spt2){
+    df = df_summary[df_summary$Split1 %in% spt,]
+    df = df[df$Split2 %in% spt2,]
+    df = df[df$Marker %in% unique(df_summary$Marker)[34:47],]
+    out2 = do.call(cbind, lapply(unique(df$Marker), function(marker){
+      df_out = df[df$Marker %in% marker,]
+      out3 = data.frame(df_out$Expr)
+      colnames(out3) = marker
+      rownames(out3) = df_out$Distance
+      return(out3)
+    }))
+  })
+  names(out1) = unique(df_summary$Split2)
+  return(out1)
+})
+names(corr_input_celltype) = unique(df_summary$Split1)
+```
+
+Get corr (Pearson)
+```{r, fig.width=8, fig.height=8}
+require(corrplot)
+require(Hmisc)
+custom_color <- colorRampPalette(rev(c("#67001F", "#B2182B", "#D6604D", "#F4A582",
+                           "#FDDBC7", "#FFFFFF", "#D1E5F0", "#92C5DE",
+                           "#4393C3", "#2166AC", "#053061")))
+
+# res = cor(corr_input_marker$Active$CD4, corr_input_marker$Active$CD4, method = "kendall")
+# Pvalue version
+# rcorr(corr_input_marker$Active$CD4, )
+res2<-rcorr(as.matrix(corr_input_celltype$Active$CD4), type = "pearson")
+
+# Insignificant correlations are leaved blank
+corrplot(res2$r, type="upper", order="hclust", 
+         p.mat = res2$P, col=custom_color(200))
+
+# heatmap(M)
+# corrplot(M, order = "hclust", method = "color", diag = T,type = "upper", col=custom_color(200))
+
+```
+
+
+```{r, fig.width=8, fig.height=8}
+require("PerformanceAnalytics")
+chart.Correlation(corr_input_marker$Active$CD4, histogram=TRUE, pch=19, method = "pearson")
+chart.Correlation(corr_input_celltype$Active$CD4, histogram=TRUE, pch=19, method = "pearson")
+# pvalues = table.Correlation(corr_input_marker$Active$CD4, corr_input_marker$Active$CD4)
+```
+
+# Follow Han's scheme to plot
+Some help from here:
+https://www.khstats.com/blog/corr-plots/corr-plots/
+```{r, fig.height=3, fig.width=3}
+cors <- function(df) {
+  M <- Hmisc::rcorr(as.matrix(df), type = "pearson")
+  # turn all three matrices (r, n, and P into a data frame)
+  Mdf <- map(M, ~data.frame(.x))
+  # return the three data frames in a list
+  return(Mdf)
+}
+
+input_matrix = as.matrix(corr_input_celltype$Latent$CD4)
+
+# Get R values
+ggdf = cors(input_matrix) %>%
+  map(~rownames_to_column(.x, var="measure1")) %>%
+  # format each data set (r,P,n) long
+  map(~pivot_longer(.x, -measure1, "measure2")) %>%
+  # merge our three list elements by binding the rows
+  bind_rows(.id = "id") %>%
+  pivot_wider(names_from = id, values_from = value) %>%
+  # Add some parameters
+  rename(pval = P) %>%
+  mutate(pval2 = 1-pval,
+         pval2 = ifelse(pval2 < 0.95, 0.94, pval2),
+         sig = ifelse(pval < 0.001, "***",
+                        ifelse(pval < 0.01, "**",
+                               ifelse(pval < 0.05, "*", NA))))
+  # head() %>%
+  # knitr::kable()
+
+# hclust
+ord <- hclust(dist(cors(input_matrix)[["r"]], method = "euclidean"), method = "ward" )$order
+ggdf$measure1 = factor(ggdf$measure1, levels = colnames(input_matrix)[ord])
+ggdf$measure2 = factor(ggdf$measure2, levels = colnames(input_matrix)[ord])
+
+# Limit
+limit_value = 1
+
+# PLOT
+g = ggplot(data = ggdf,
+       mapping = aes(x = factor(measure1), y = factor(measure2), fill = r))+
+  geom_point(mapping = aes(size = pval2),
+             shape = 22,
+             show.legend = T) +
+  geom_text(mapping = aes(label = sig), na.rm = T, size = 3) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_size(range = c(1,10)) +
+  scale_fill_gradientn(colours = rev(brewer.pal(11, "RdBu")),
+                       limits = c((-1) * limit_value, limit_value),
+                       na.value = "grey")
+ggsave(g, filename = paste0("PaperPlots/TEST.svg"), width = 6, height = 6)
+```
+
+Loop through each Active/Latent and CD4/Macrophage
+```{r}
+# Limit
+limit_value = 1
+
+# Rewrite to have the same order for latent as active
+
+  lapply(names(corr_input_celltype$Latent), function(nam2){
+    print(nam2)
+    #####
+    # LAtent first
+    input_matrix = as.matrix(corr_input_celltype[["Latent"]][[nam2]])
+    # Get R values
+    ggdf = cors(input_matrix) %>%
+      map(~rownames_to_column(.x, var="measure1")) %>%
+      # format each data set (r,P,n) long
+      map(~pivot_longer(.x, -measure1, "measure2")) %>%
+      # merge our three list elements by binding the rows
+      bind_rows(.id = "id") %>%
+      pivot_wider(names_from = id, values_from = value) %>%
+      # Add some parameters
+      rename(pval = P) %>%
+      mutate(pval2 = 1-pval,
+             pval2 = ifelse(pval2 < 0.95, 0.94, pval2),
+             sig = ifelse(pval < 0.001, "***",
+                            ifelse(pval < 0.01, "**",
+                                   ifelse(pval < 0.05, "*", NA))))
+    # hclust
+    ord <- hclust(dist(cors(input_matrix)[["r"]], method = "euclidean"), method = "ward.D" )$order
+    ggdf$measure1 = factor(ggdf$measure1, levels = colnames(input_matrix)[ord])
+    ggdf$measure2 = factor(ggdf$measure2, levels = colnames(input_matrix)[ord])
+    
+    # PLOT
+    g = ggplot(data = ggdf,
+           mapping = aes(x = factor(measure1), y = factor(measure2), fill = r))+
+      geom_point(mapping = aes(size = pval2),
+                 shape = 22,
+                 show.legend = T) +
+      # geom_text(mapping = aes(label = sig), na.rm = T, size = 3) +
+      theme_bw() + 
+      theme(axis.text.x = element_text(angle = 90)) +
+      scale_size(range = c(1,10)) +
+      scale_fill_gradientn(colours = rev(brewer.pal(11, "RdBu")),
+                           limits = c((-1) * limit_value, limit_value),
+                           na.value = "grey") + ggtitle(paste("Latent", nam2))
+    ggsave(g, filename = paste0("PaperPlots/NoStar.LatencyHeatmap.Latent.", nam2, ".svg"), width = 6, height = 6)
+    
+    #####
+    # ACTIVE
+        input_matrix = as.matrix(corr_input_celltype[["Active"]][[nam2]])
+    # Get R values
+    ggdf = cors(input_matrix) %>%
+      map(~rownames_to_column(.x, var="measure1")) %>%
+      # format each data set (r,P,n) long
+      map(~pivot_longer(.x, -measure1, "measure2")) %>%
+      # merge our three list elements by binding the rows
+      bind_rows(.id = "id") %>%
+      pivot_wider(names_from = id, values_from = value) %>%
+      # Add some parameters
+      rename(pval = P) %>%
+      mutate(pval2 = 1-pval,
+             pval2 = ifelse(pval2 < 0.95, 0.94, pval2),
+             sig = ifelse(pval < 0.001, "***",
+                            ifelse(pval < 0.01, "**",
+                                   ifelse(pval < 0.05, "*", NA))))
+    ggdf$measure1 = factor(ggdf$measure1, levels = colnames(input_matrix)[ord])
+    ggdf$measure2 = factor(ggdf$measure2, levels = colnames(input_matrix)[ord])
+        # PLOT
+    g = ggplot(data = ggdf,
+           mapping = aes(x = factor(measure1), y = factor(measure2), fill = r))+
+      geom_point(mapping = aes(size = pval2),
+                 shape = 22,
+                 show.legend = T) +
+      # geom_text(mapping = aes(label = sig), na.rm = T, size = 3) +
+      theme_bw() + 
+      theme(axis.text.x = element_text(angle = 90)) +
+      scale_size(range = c(1,10)) +
+      scale_fill_gradientn(colours = rev(brewer.pal(11, "RdBu")),
+                           limits = c((-1) * limit_value, limit_value),
+                           na.value = "grey") + ggtitle(paste("Active", nam2))
+    ggsave(g, filename = paste0("PaperPlots/NoStar.LatencyHeatmap.Active.", nam2, ".svg"), width = 6, height = 6)
+    
+  })
+```
+Write out for Han
+```{r}
+saveRDS(corr_input_celltype, "corr_input_celltype.rds")
+saveRDS(corr_input_marker, "corr_input_marker.rds")
+```
+
+
+
+

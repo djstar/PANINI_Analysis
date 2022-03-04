@@ -1,0 +1,134 @@
+Amount of IL10 around latent vs active as a function of distance
+
+1200um = 1591 pixels
+1. For each latency_status (Active, Latent, vRNA+ or Uninfected)
+library(parallel)
+library(foreach)
+
+```{r}
+pixel_to_microns = 400/512
+plot_df = CN2_df_out_newlatency
+# Boolean output
+anchor_cells = (!CN2_df_out_newlatency$latency_status %in% "Uninfected") & (CN2_df_out_newlatency$cell_type_for_CN %in% c("CD4_T", "Macrophage", "Treg"))
+micron_dist = 100 #in um
+split_col1 = "latency_status"
+split_col2 = "cell_type"
+
+bins = 11
+columns_to_use = c(11:43, 52:65) # Markers and CellTypes Counts
+cores = 6 # Multicore
+
+dist_df = get_distance_matrix(plot_df = CN2_df_out_newlatency, anchor_cells = anchor_cells, split_col1 = split_col1, split_col2 = split_col2, columns_to_use = columns_to_use, micron_dist = 100, pixel_to_microns = 400/512, bins = 11, cores = 6)
+```
+
+
+# Tomorrow plot the graphs!
+First plot with mean values
+```{r, fig.width=6, fig.height=2}
+plot_df = dist_df[dist_df$Type %in% "Mean",]
+colnames(plot_df)[1:bins-1] = seq(0, micron_dist, length.out = bins)[-1]
+
+# Clean up into tidy df
+plot_df_tidy = gather(plot_df, Distance, Expr, -c("Marker", "PointNum", "cellLabelInImage", "Type", "Split1", "Split2"))
+plot_df_tidy$Distance = as.numeric(plot_df_tidy$Distance)
+plot_df_tidy$Marker = as.factor(plot_df_tidy$Marker)
+# Make Summary
+
+df_summary = do.call(rbind, mclapply(unique(plot_df_tidy$Marker), function(marker){
+  df = plot_df_tidy[plot_df_tidy$Marker %in% marker,]
+  df = df[complete.cases(df),] # Remove NA
+  # Time to split
+  df_persplit = do.call(rbind, lapply(unique(df$Split1), function(spt){
+    df2 = df[df$Split1 %in% spt,]
+    df2_persplit = do.call(rbind, lapply(unique(df2$Split2), function(spt2){
+      df3 = df2[df2$Split2 %in% spt2,]
+      df4 = data.frame(df3 %>% group_by(Distance) %>%
+      summarise(across(Expr:Expr, mean),.groups = 'drop'))
+      # Get Confidence Interval
+      df4$mean = tapply(df3$Expr, df3$Distance, mean)
+      df4$sd = tapply(df3$Expr, df3$Distance, sd)
+      df4$sem = df4$sd/sqrt(table(df3$Distance)-1)
+      df4$CI_lower <- df4$mean + qt((1-0.95)/2, df=table(df3$Distance)-1)*df4$sem
+      df4$CI_upper <- df4$mean - qt((1-0.95)/2, df=table(df3$Distance)-1)*df4$sem
+      df4$Split1 = spt
+      df4$Split2 = spt2
+      return(df4)
+    }))
+    return(df2_persplit)
+  
+  })) # Split per split
+  df_persplit$Marker = marker
+  return(df_persplit)
+}, mc.cores = cores))
+# df_summary$Split1 = as.factor(df_summary$Split1)
+# df_summary$Split2 = as.factor(df_summary$Split2)
+df_summary$Distance = as.numeric(as.character(df_summary$Distance))
+df_summary_novRNA = df_summary[!df_summary$Split1 %in% "vRNA+",]
+# Plot
+unique(df_summary_novRNA$Marker)
+marker = "IL10"
+# Loop through markers
+lapply(unique(df_summary_novRNA$Marker), function(marker){
+  print(marker)
+  g = ggplot(df_summary_novRNA[df_summary_novRNA$Marker %in% marker,], aes(x = Distance, y = Expr, group = Split1, color = Split1, fill = Split1)) + geom_line() +
+     geom_ribbon(aes(ymin=CI_lower, ymax=CI_upper), alpha=0.2, linetype=0) + theme_bw() + ggtitle(paste0(marker, " expression from Infected Cell")) + 
+    xlab("Distance (um)") + ylab("Mean Expression") + scale_fill_manual(values = c("Latent" = "green3", "Active" = "darkviolet"), name="fill") + 
+    scale_color_manual(values = c("Latent" = "green3", "Active" = "darkviolet")) + facet_wrap(~Split2,scales="free_y") 
+  ggsave(g, filename = paste0("PaperPlots/Distance_Expression_LatentActive_", marker,".pdf"), width = 12, height = 4)
+})
+```
+
+Now plot positive values
+```{r, fig.width=6, fig.height=2}
+plot_df = dist_df[dist_df$Type %in% "Positive",]
+colnames(plot_df)[1:bins-1] = seq(0, micron_dist, length.out = bins)[-1]
+
+# Clean up into tidy df
+plot_df_tidy = gather(plot_df, Distance, Expr, -c("Marker", "PointNum", "cellLabelInImage", "Type", "Split1", "Split2"))
+plot_df_tidy$Distance = as.numeric(plot_df_tidy$Distance)
+plot_df_tidy$Marker = as.factor(plot_df_tidy$Marker)
+# Make Summary
+
+df_summary = do.call(rbind, mclapply(unique(plot_df_tidy$Marker), function(marker){
+  df = plot_df_tidy[plot_df_tidy$Marker %in% marker,]
+  df = df[complete.cases(df),] # Remove NA
+  # Time to split
+  df_persplit = do.call(rbind, lapply(unique(df$Split1), function(spt){
+    df2 = df[df$Split1 %in% spt,]
+    df2_persplit = do.call(rbind, lapply(unique(df2$Split2), function(spt2){
+      df3 = df2[df2$Split2 %in% spt2,]
+      df4 = data.frame(df3 %>% group_by(Distance) %>%
+      summarise(across(Expr:Expr, mean),.groups = 'drop'))
+      # Get Confidence Interval
+      df4$mean = tapply(df3$Expr, df3$Distance, mean)
+      df4$sd = tapply(df3$Expr, df3$Distance, sd)
+      df4$sem = df4$sd/sqrt(table(df3$Distance)-1)
+      df4$CI_lower <- df4$mean + qt((1-0.95)/2, df=table(df3$Distance)-1)*df4$sem
+      df4$CI_upper <- df4$mean - qt((1-0.95)/2, df=table(df3$Distance)-1)*df4$sem
+      df4$Split1 = spt
+      df4$Split2 = spt2
+      return(df4)
+    }))
+    return(df2_persplit)
+  
+  })) # Split per split
+  df_persplit$Marker = marker
+  return(df_persplit)
+}, mc.cores = cores))
+# df_summary$Split1 = as.factor(df_summary$Split1)
+# df_summary$Split2 = as.factor(df_summary$Split2)
+df_summary$Distance = as.numeric(as.character(df_summary$Distance))
+df_summary_novRNA = df_summary[!df_summary$Split1 %in% "vRNA+",]
+# Plot
+unique(df_summary_novRNA$Marker)
+marker = "IL10"
+# Loop through markers
+lapply(unique(df_summary_novRNA$Marker), function(marker){
+  # print(marker)
+  g = ggplot(df_summary_novRNA[df_summary_novRNA$Marker %in% marker,], aes(x = Distance, y = Expr, group = Split1, color = Split1, fill = Split1)) + geom_line() +
+     geom_ribbon(aes(ymin=CI_lower, ymax=CI_upper), alpha=0.2, linetype=0) + theme_bw() + ggtitle(paste0(marker, " Fraction Positive from Infected Cell")) + 
+    xlab("Distance (um)") + ylab("Mean Fraction Positive") + scale_fill_manual(values = c("Latent" = "green3", "Active" = "darkviolet"), name="fill") + 
+    scale_color_manual(values = c("Latent" = "green3", "Active" = "darkviolet")) + facet_wrap(~Split2,scales="free_y") 
+  ggsave(g, filename = paste0("PaperPlots/Distance_PositiveFraction_LatentActive_", marker,".svg"), width = 12, height = 4)
+})
+```

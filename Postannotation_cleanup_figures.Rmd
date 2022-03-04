@@ -1,0 +1,903 @@
+---
+title: "viralMIBI-postannotation_cleanup figures"
+author: "Sizun Jiang"
+date: "15/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(echo = TRUE) 
+knitr::opts_knit$set(root.dir = "/Users/sizunj/Nolan Lab Dropbox/Sizun Jiang/projects/DNAscope/Data/MIBI/DNAscope Manuscript Data/ConvertedToPoints/Analysis/viralMIBI/")
+
+# setwd("/Users/sizunj/Nolan Lab Dropbox/Sizun Jiang/projects/DNAscope/Data/MIBI/NewTissuesSlides97-101/Tiled Data 3 Depths/Analysis")
+```
+
+## R Markdown
+
+```{r, echo=FALSE, warning=FALSE, error=FALSE}
+library(FNN)
+library(flowCore)
+library(R.matlab)
+library(FlowSOM)
+library(MetaCyto)
+library(matrixStats)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(limma)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+library(ConsensusClusterPlus)
+library(Biobase)
+library(MEM)
+library(tidyverse)
+library(Rtsne)
+library(uwot)
+library(ComplexHeatmap)
+library(bioimagetools)
+library(magick)
+library(EBImage)
+library(jamba)
+library(patchwork)
+library(preprocessCore)
+library(gplots)
+library(spatstat)
+library("ggpubr")
+library(PCAtools)
+library(tidyverse)
+
+source("/Users/sizunj/Nolan Lab Dropbox/Sizun Jiang/projects/MIBI/functions/MIBI_functions.R")
+library(randomForest)
+library(ROCR)
+library(matrixStats)
+source("/Users/sizunj/Nolan Lab Dropbox/Sizun Jiang/projects/MIBI/functions/random forest functions.R")
+library(caret)
+
+expr2_df_cent = read.csv("22Feb21_CN2df_newactivecells.csv")
+```
+
+
+
+```{r, fig.height=8, fig.width=16}
+
+mycolor_celltype =c(brewer.pal(n = 9, name = "Set1"),brewer.pal(n = 8, name = "Pastel2"))
+mycolor_celltype = replace(mycolor_celltype, c(2, 1), mycolor_celltype[c(1, 2)])
+mycolor_celltype = replace(mycolor_celltype, c(2, 3), mycolor_celltype[c(3, 2)])
+
+mycolor_celltype = mycolor_celltype[-c(9,10)]
+mycolor_celltype = replace(mycolor_celltype, c(12, 15), mycolor_celltype[c(15, 12)])
+celltype_table = table(expr2_df_cent$cell_type)
+
+ggdf_Point2 = data.frame(sample_id = factor(names(celltype_table), levels = names(celltype_table)[mixedOrder(names(celltype_table))]),
+
+g2 = ggplot(ggdf_Point2, aes(x = as.factor(sample_id), y = counts, fill = sample_id))
+g2 + geom_bar(stat = "identity") + scale_fill_manual(values = mycolor_celltype) +
+geom_text(aes(label = counts), hjust=0.5, vjust=-0.5, size = 4) + theme_bw() +ggtitle("Cell Type Statistics") + xlab("Cluster") 
+
+
+```
+Marker Expression Profile
+```{r, fig.width=4, fig.height=4}
+cell_type_label = expr2_df_cent$cell_type
+
+require(gplots)
+mat_markers = expr2_df_cent[,c(10, 12:41)]
+  mat_cor = cor(mat_markers,method="pearson")
+  
+  colors = c(seq(0,1,length=22))
+  my_palette <- rev(colorRampPalette(brewer.pal(6,"RdBu"))(n = 21))
+  
+  hm2_call = heatmap.2(mat_cor,col=my_palette,breaks=colors,density.info="none",trace="none",Rowv=T,Colv=T,dendrogram="both",symm=T,labRow=colnames(mat_markers),labCol=colnames(mat_markers),margins=c(5,5),scale="none",cexRow=0.8,cexCol=0.8,rowsep=c(0:50),colsep=c(0:50),sepcolor="black",sepwidth=c(0.0001,0.0001))
+  # New color
+  require(pals)
+  require(svglite)
+  colors = c(seq(-3,3,length=100))
+  my_palette <- coolwarm(99)
+  
+  # Save as SVG
+  svglite(file = "PaperPlots/CellTypeHeatmap.svg",
+      width = 10,
+      height = 10
+      # system_fonts = list(sans = "Arial Unicode MS")
+      # dpi = 300
+      )
+  
+  hm2_call = heatmap.2(cell_type_mat,col=my_palette,breaks=colors,density.info="none",trace="none",Rowv=F,Colv=F,dendrogram="none",symm=F,labRow=cell_types,labCol=colnames(mat_markers),
+                       margins=c(6*(dim(cell_type_mat)[2]/dim(cell_type_mat)[1]),6),
+                       scale="col",cexRow=1,cexCol=1,rowsep=c(0:20),colsep=c(0:33),sepcolor="black",sepwidth=c(0.0001,0.0001))
+
+  dev.off()
+```
+
+
+CN color scheme
+```{r}
+CN_colors =c(brewer.pal(n = 8, name = "Dark2"), brewer.pal(n = 9, name = "Pastel1"))
+CN_colors = CN_colors[-c(5,7)]
+CN_colors = replace(CN_colors, c(4, 10), CN_colors[c(10, 4)])
+
+```
+
+Plot per FOV etc. First lets do all the plots without relationship to CNs (cos "Others" taken out in CNs)
+```{r}
+plot_df = cbind(expr2_df_cent[,c("PointNum", "PointName", "Animal", "Infected", "cell_type", "SIV_Status")])
+plot_df = plot_df[!plot_df$cell_type %in% "Other",]
+
+# Get levels right
+names(mycolor_celltype) = levels(expr2_df_cent$cell_type)
+
+# Ordering things so that order for pointnum and animal are SIV+ then SIV-
+plot_df$PointNum = factor(plot_df$PointNum, levels = c(1:6, 14:20, 7:13))
+plot_df$Animal = factor(plot_df$Animal, levels = c(1,2,5,6,3,4))
+plot_df$Infected[plot_df$Infected == 0] = "Uninfected Animal"
+plot_df$Infected[plot_df$Infected == 1] = "Infected Animal"
+plot_df$Infected = factor(plot_df$Infected, levels = c("Infected Animal", "Uninfected Animal"))
+
+# By Point Num
+ggplot(plot_df,aes(x=PointNum,fill=cell_type)) + geom_bar(position="fill") +  scale_fill_manual(values=mycolor_celltype[names(mycolor_celltype) %in% plot_df$cell_type]) +
+  labs(x = "Field of View", y = "Proportion",title = "Cell Type Composition per Field of View") + theme_bw()  + labs(fill = "Cell Type")
+ggsave("PaperPlots/CellType_perFOV.svg")
+# By Point Name
+ggplot(plot_df,aes(x=Animal,fill=cell_type)) + geom_bar(position="fill") +  scale_fill_manual(values=mycolor_celltype[names(mycolor_celltype) %in% plot_df$cell_type]) +
+  labs(x = "Animal", y = "Proportion",title = "Cell Type Composition per Animal") + theme_bw()   + labs(fill = "Cell Type")
+ggsave("PaperPlots/CellType_perAnimal.svg")
+
+ggplot(plot_df,aes(x=Infected,fill=cell_type)) + geom_bar(position="fill") +  scale_fill_manual(values=mycolor_celltype[names(mycolor_celltype) %in% plot_df$cell_type]) +
+  labs(x = "Animal Infection Status", y = "Proportion",title = "Cell Type Composition per Animal Infection Status") + theme_bw()  + labs(fill = "Cell Type")
+ggsave("PaperPlots/CellType_perInfectionStatus.svg")
+
+```
+Plot FoldChange of each celltype over uninfected
+```{r}
+uninf_celltype_tab = prop.table(table(plot_df$cell_type[plot_df$Infected %in% "Uninfected Animal"]))
+inf_celltype_tab = prop.table(table(plot_df$cell_type[plot_df$Infected %in% "Infected Animal"]))
+df = as.data.frame(log2(inf_celltype_tab/uninf_celltype_tab))
+# Rank celltypes
+df$Var1 = factor(df$Var1, levels = df$Var1[order(df$Freq, decreasing = T)])
+
+
+
+ggplot(df, aes(x = Var1, y = Freq, fill = Var1)) + geom_bar(stat = "identity", color = "black") +  scale_fill_manual(values=mycolor_celltype[order(df$Freq, decreasing = T)]) +
+  labs(x = "Cell Types", y = "Log2 Fold Enrichment",title = "Log2 FC Cell Type Composition of Infected/Uninfected Rhesus Macaques") + theme_bw()  + labs(fill = "Cell Type")+ theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+
+ggsave("PaperPlots/CellType_Log2FC_perInfectionStatus.svg")
+
+```
+
+Rank by % per FOV of: 
+1: CD8
+2: Macrophage
+3: Infected Cell
+```{r}
+# First on FOVs
+infiltrate_df = do.call(rbind, lapply(1:20, function(fov){
+  sub_df = plot_df$cell_type[plot_df$PointNum %in% fov]
+  sub_df_out = as.data.frame(prop.table(table(sub_df))*100)
+  sub_df_out$PointNum = fov
+  sub_df_out$Infected = unique(plot_df$Infected[plot_df$PointNum %in% fov])
+  colnames(sub_df_out)[1] = "cell_type"
+  return(sub_df_out)
+}))
+
+rank_plots = lapply(unique(infiltrate_df$cell_type), function(ct){
+  sub_df = infiltrate_df[infiltrate_df$cell_type %in% ct,]
+  p = ggplot(sub_df, aes(x = reorder(PointNum,Freq), y = Freq, fill = Infected)) + geom_bar(stat = "identity", color = "black") + labs(x = "FOVs", y = "Percent Infiltrating",title = paste0("Ranked Infiltration of: ", ct)) + theme_bw()  + labs(fill = "Cell Type")+ coord_flip()
+  ggsave(plot = p, filename = paste0("viralMIBI/PaperPlots/CellType_Ranking_", ct,".svg"))
+  return(p)
+})
+
+lapply(rank_plots, function(p){
+  p
+})
+
+# SIV_status_tab = do.call(rbind, lapply(1:20, function(fov){
+#   sub_df = plot_df[plot_df$PointNum %in% fov,]
+#   sub_df_out = as.data.frame(prop.table(table(sub_df$SIV_Status))*100)
+#   sub_df_out$PointNum = fov
+#   return(sub_df_out)
+# }))
+# 
+#  = prop.table(table(plot_df$SIV_Status[plot_df$Infected %in% "Infected Animal"]))
+# 
+
+```
+
+
+Clean up CN2 csv to have additional info
+
+
+```{r}
+plot_df2 = cbind(expr2_df_cent[,c("PointNum", "Animal", "Infected", "cell_type", "SIV_Status", "neighborhood20")])
+
+# Ordering things so that order for pointnum and animal are SIV+ then SIV-
+plot_df2$PointNum = factor(plot_df2$PointNum, levels = c(1:6, 14:20, 7:13))
+plot_df2$Animal = factor(plot_df2$Animal, levels = c(1,2,5,6,3,4))
+plot_df2$Infected[plot_df2$Infected == 0] = "Uninfected Animal"
+plot_df2$Infected[plot_df2$Infected == 1] = "Infected Animal"
+plot_df2$Infected = factor(plot_df2$Infected, levels = c("Infected Animal", "Uninfected Animal"))
+plot_df2$neighborhood20 = as.factor(plot_df2$neighborhood20)
+
+# By Point Num
+ggplot(plot_df2,aes(x=PointNum,fill=neighborhood20)) + geom_bar(position="fill") +  scale_fill_manual(values=CN_colors) +
+  labs(x = "Field of View", y = "Proportion",title = "Cell Type Composition per Field of View") + theme_bw()  + labs(fill = "Cell Neighborhood")
+ggsave("PaperPlots/CN_perFOV.svg")
+# By Point Name
+ggplot(plot_df2,aes(x=Animal,fill=neighborhood20)) + geom_bar(position="fill") +  scale_fill_manual(values=CN_colors) +
+  labs(x = "Animal", y = "Proportion",title = "Cell Type Composition per Animal") + theme_bw()   + labs(fill = "Cell Neighborhood")
+ggsave("PaperPlots/CN_perAnimal.svg")
+
+ggplot(plot_df2,aes(x=Infected,fill=neighborhood20)) + geom_bar(position="fill") +  scale_fill_manual(values=CN_colors) +
+  labs(x = "Animal Infection Status", y = "Proportion",title = "Cell Type Composition per Animal Infection Status") + theme_bw()  + labs(fill = "Cell Neighborhood")
+ggsave("PaperPlots/CN_perInfectionStatus.svg")
+
+```
+
+Plot FoldChange of each CN over uninfected
+```{r}
+uninf_CN_tab = prop.table(table(plot_df2$neighborhood20[plot_df2$Infected %in% "Uninfected Animal"]))
+inf_CN_tab = prop.table(table(plot_df2$neighborhood20[plot_df2$Infected %in% "Infected Animal"]))
+df2 = as.data.frame(log2(inf_CN_tab/uninf_CN_tab))
+
+# Order df3 by frequency
+df2$Var1 = factor(df2$Var1, levels = df2$Var1[order(df2$Freq, decreasing = T)])
+
+ggplot(df2, aes(x = Var1, y = Freq, fill = Var1)) + geom_bar(stat = "identity", color = "black") +  scale_fill_manual(values=CN_colors[order(df2$Freq, decreasing = T)]) +
+  labs(x = "CNs", y = "Log2 Fold Enrichment",title = "Log2 FC Cell Type Composition of Infected/Uninfected Rhesus Macaques") + theme_bw()  + labs(fill = "Cell Neighborhoods")+ theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1))
+ggsave("PaperPlots/CN_Log2FC_perInfectionStatus.svg")
+
+```
+Rank plots for CNs per FOV
+```{r}
+# First on FOVs
+infiltrate_df2 = do.call(rbind, lapply(1:20, function(fov){
+  sub_df = plot_df2$neighborhood20[plot_df2$PointNum %in% fov]
+  sub_df_out = as.data.frame(prop.table(table(sub_df))*100)
+  sub_df_out$PointNum = fov
+  sub_df_out$Infected = unique(plot_df2$Infected[plot_df2$PointNum %in% fov])
+  colnames(sub_df_out)[1] = "CNs"
+  return(sub_df_out)
+}))
+
+CN_nam = c("T/DC/NK Rich",
+           "B Cell Zone",
+           "Macrophage Rich 2",
+           "T Cell Zone",
+           "B/NK/Monocyte Rich",
+           "CD4 T Cell Rich",
+           "FDC Rich",
+           "Macrophage Rich 1",
+           "Stromal/Endothelial",
+           "CD8 T Cell Infiltrate",
+           "Immune Infiltrate")
+
+rank_plots2 = lapply(unique(infiltrate_df2$CNs), function(ct){
+  sub_df = infiltrate_df2[infiltrate_df2$CNs %in% ct,]
+  p = ggplot(sub_df, aes(x = reorder(PointNum,Freq), y = Freq, fill = Infected)) + geom_bar(stat = "identity", color = "black") + labs(x = "FOVs", y = "Percent Infiltrating",title = paste0("Ranked Infiltration of: ", CN_nam[as.numeric(ct)])) + theme_bw()  + labs(fill = "CNs")+ coord_flip()
+  ggsave(plot = p, filename = paste0("PaperPlots/CN_Ranking_", ct,".svg"))
+  return(p)
+})
+
+lapply(rank_plots2, function(p){
+  p
+})
+
+```
+
+
+## CN diff for each marker between SIV+ and SIV-
+Each dot should be 1 FOV
+Include Stats Test
+
+```{r, fig.width=12, fig.height=5}
+# require(tidyverse)
+library(reshape2)
+sub_df = cbind(expr2_df_cent[,c(12,14:43)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+sub_df2 = data.frame(sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(Vimentin:Groups, mean)))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "Marker")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "variable"] = "Marker"
+# Find average expression per FOV
+
+CN_marker_diff = lapply(unique(expr2_df_cent$neighborhood20text), function(cn){
+  sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$CN %in% cn,]
+  p = ggplot(data=sub_plotdf, aes(x=Marker, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+    # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+    geom_point(position=position_jitterdodge(), size = 0.5)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  compare_means(value ~ Groups, data = sub_plotdf,
+                group.by = "Marker")
+  g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment in CN ", cn)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+  ggsave(plot = g, filename = paste0("PaperPlots/CN_Marker_Enrichment_", cn,".svg"), width = 12, height = 6)
+  return(g)
+})
+
+# lapply(CN_marker_diff, function(p){
+#   p
+# })
+```
+### Repeat for Cell Types
+```{r, fig.width=12, fig.height=5}
+sub_df = cbind(expr2_df_cent[,c(52:65)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+# sub_df = cbind(expr2_df_cent[,c(52:65)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+
+sub_df2 = sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(CD4_T:Groups, mean))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "CellType")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+
+# Find average expression per FOV
+
+CN_celltype_diff = lapply(unique(expr2_df_cent$neighborhood20text), function(cn){
+  sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$CN %in% cn,]
+  p = ggplot(data=sub_plotdf, aes(x=CellType, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+    # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+    geom_point(position=position_jitterdodge(), size = 0.5)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  compare_means(value ~ Groups, data = sub_plotdf,
+                group.by = "CellType")
+  g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment in CN ", cn)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+  ggsave(plot = g, filename = paste0("PaperPlots/CN_CellType_Enrichment2_", cn,".svg"), width = 12, height = 6)
+  return(g)
+})
+
+```
+Write a function to do the comparisons for the above:
+1. Per Marker
+2. Expression across CNs in +/- SIV
+
+```{r, fig.width=12, fig.height=5}
+# Recalculate this chuck since chuck before used CellTypes vs Markers
+require(tidyverse)
+require(reshape2)
+sub_df = cbind(expr2_df_cent[,c(12,14:43)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+sub_df2 = sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(Vimentin:Groups, mean))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "Marker")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+
+# Find average expression per FOV
+
+CN_marker_diff2 = lapply(unique(plot_CN_withmarkers$Marker), function(marker){
+  sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$Marker %in% marker,]
+  p = ggplot(data=sub_plotdf, aes(x=CN, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+    # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+    geom_point(position=position_jitterdodge(), size = 0.5)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  compare_means(value ~ Groups, data = sub_plotdf,
+                group.by = "CN")
+  g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment for Marker: ", marker)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+  ggsave(plot = g, filename = paste0("viralMIBI/PaperPlots/CN_Marker_Enrichment_permarker_", marker,".svg"), width = 12, height = 6)
+  return(g)
+})
+```
+
+1. Per CellType
+2. Enrichment/Number across CNs in +/- SIV
+```{r, fig.width=12, fig.height=5}
+# Recalculate this chuck since chuck before used CellTypes vs Markers
+require(tidyverse)
+require(reshape2)
+sub_df = cbind(expr2_df_cent[,c(52:65)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+sub_df2 = sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(B:Groups, mean))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "CellType")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+
+# Find average expression per FOV
+
+CN_celltype_diff2 = lapply(unique(plot_CN_withmarkers$CellType), function(celltype){
+  sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$CellType %in% celltype,]
+  p = ggplot(data=sub_plotdf, aes(x=CN, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+    # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+    geom_point(position=position_jitterdodge(), size = 0.5)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  compare_means(value ~ Groups, data = sub_plotdf,
+                group.by = "CN")
+  g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment for CellType: ", celltype)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+  ggsave(plot = g, filename = paste0("viralMIBI/PaperPlots/CN_Marker_Enrichment_perCellType_", celltype,".svg"), width = 12, height = 6)
+  return(g)
+})
+```
+## Fig 6 Paper Plot generation
+```{r}
+# subdf for cell types per CN
+sub_df = cbind(expr2_df_cent[,c(12,14:43)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+sub_df2 = data.frame(sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(Vimentin:Groups, mean)))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "Marker")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "variable"] = "Marker"
+
+# subdf for markers per CN
+sub_df = cbind(expr2_df_cent[,c(52:65)], expr2_df_cent[,c("Groups", "PointNum", "neighborhood20text")])
+sub_df2 = data.frame(sub_df %>% group_by(PointNum, neighborhood20text) %>%
+  summarise(across(CD4_T:Groups, mean)))
+plot_CN_withcelltype = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum"),
+                           variable.name = "CellType")
+plot_CN_withcelltype$Groups[plot_CN_withcelltype$Groups == 0] = "Uninfected Animal"
+plot_CN_withcelltype$Groups[plot_CN_withcelltype$Groups == 1] = "Infected Animal"
+plot_CN_withcelltype$Groups = factor(plot_CN_withcelltype$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withcelltype)[colnames(plot_CN_withcelltype) %in% "neighborhood20text"] = "CN"
+colnames(plot_CN_withcelltype)[colnames(plot_CN_withcelltype) %in% "variable"] = "CellType"
+```
+
+```{r}
+table(expr2_df_cent$neighborhood20text)
+colnames(expr2_df_cent)
+```
+
+## Diff combinations for the paper
+CN = "CD8_T_Cell_Infiltrate"
+chosen_markers = c("Ki.67", "Granzyme.B", "NFkB.p100..pS865.")
+chosen_celltypes = c("CD8_GzmB", "CD8_T")
+
+CN = "FDC_Rich"
+chosen_markers = c("Ki.67", "CD169..Sialoadhesin.", "NFkB.p100..pS865.", "CD138")
+chosen_celltypes = c("Macrophage")
+
+CN = "Immune_Infiltrate"
+chosen_markers = c("Ki.67", "FoxP3", "Granzyme.B", "CD169..Sialoadhesin.", "NFkB.p100..pS865.", "IL10", "HLA-DR", "CD36", "FoxO1", "MPO")
+chosen_celltypes = c("CD8_GzmB", "CD8_T", "Macrophage")
+
+CN = "Macrophage_Rich_1"
+chosen_markers = c("FoxO1", "IL10", "CD209..DC.SIGN.", "CD169..Sialoadhesin.")
+chosen_celltypes = c("CD8_T")
+
+CN = "Macrophage_Rich_2"
+chosen_markers = c("FoxO1", "IL10", "CD209..DC.SIGN.", "CD169..Sialoadhesin.")
+chosen_celltypes = c("CD8_T")
+
+CN = "T_DC_NK_Rich"
+chosen_markers = c("Ki.67", "NFkB.p100..pS865.", "IL10")
+chosen_celltypes = c("DC", "NK", "CD8_T", "CD4_T") 
+
+```{r}
+CN = "Immune_Infiltrate"
+chosen_markers = c("Ki.67", "FoxP3", "Granzyme.B", "CD169..Sialoadhesin.", "NFkB.p100..pS865.", "IL10", "HLA-DR", "CD36", "FoxO1", "MPO")
+chosen_celltypes = c("CD8_GzmB", "CD8_T", "Macrophage")
+
+sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$Marker %in% chosen_markers,]
+sub_plotdf = sub_plotdf[sub_plotdf$CN %in% CN,]
+p = ggplot(data=sub_plotdf, aes(x=Marker, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+  # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+  geom_point(position=position_jitterdodge(), size = 0.5)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+compare_means(value ~ Groups, data = sub_plotdf,
+              group.by = "CN")
+p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Marker Enrichment for CN: ", CN)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylim(c(0,0.3))
+
+# ggsave(filename = paste0("viralMIBI/PaperPlots/Final_CN_Marker_Enrichment_", CN,".svg"), width = 12, height = 6)
+
+
+
+sub_plotdf2 = plot_CN_withcelltype[plot_CN_withcelltype$CellType %in% chosen_celltypes,]
+sub_plotdf2 = sub_plotdf2[sub_plotdf2$CN %in% CN,]
+
+p = ggplot(data=sub_plotdf2, aes(x=CellType, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+  # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+  geom_point(position=position_jitterdodge(), size = 0.5)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+# compare_means(value ~ Groups, data = sub_plotdf2,
+#               group.by = "CN")
+p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Cell Type Enrichment for CN: ", CN)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggsave(filename = paste0("PaperPlots/Final2_CN_CellType_Enrichment_", CN,".svg"), width = 12, height = 6)
+  
+```
+
+
+```{r}
+expr2_df_cent_mva = expr2_df_cent[,c(4,5, 67, 68, 66, 52:65, 70:100)]
+expr2_df_cent_mva
+# Summarize mean per CN
+expr2_df_cent_mva = expr2_df_cent_mva %>% group_by(Groups, Patients, neighborhood20) %>%
+  summarise(across(CD4_T:CD45_20_CN2, mean))
+dim(expr2_df_cent_mva)
+expr2_df_cent_mva
+```
+
+Profile Plot
+```{r}
+makeProfilePlot <- function(mylist,names)
+  {
+     require(RColorBrewer)
+     # find out how many variables we want to include
+     numvariables <- length(mylist)
+     # choose 'numvariables' random colours
+     colours <- brewer.pal(numvariables,"Set1")
+     # find out the minimum and maximum values of the variables:
+     mymin <- 1e+20
+     mymax <- 1e-20
+     for (i in 1:numvariables)
+     {
+        vectori <- mylist[[i]]
+        mini <- min(vectori)
+        maxi <- max(vectori)
+        if (mini < mymin) { mymin <- mini }
+        if (maxi > mymax) { mymax <- maxi }
+     }
+     # plot the variables
+     for (i in 1:numvariables)
+     {
+        vectori <- mylist[[i]]
+        namei <- names[i]
+        colouri <- colours[i]
+        if (i == 1) { plot(vectori,col=colouri,type="l",ylim=c(mymin,mymax)) }
+        else         { points(vectori, col=colouri,type="l")                                     }
+        lastxval <- length(vectori)
+        lastyval <- vectori[length(vectori)]
+        text((lastxval-10),(lastyval),namei,col="black",cex=0.6)
+     }
+  }
+
+# library(RColorBrewer)
+# names <- c("V2","V3","V4","V5","V6")
+mylist <- as.list((expr2_df_cent_mva[,5:49]))
+makeProfilePlot(mylist,colnames((expr2_df_cent_mva[,5:49])))
+```
+calculate summary statistics such as the mean and standard deviation for each of the variables in your multivariate data set.
+```{r}
+sapply(expr2_df_cent_mva[,4:48],mean)
+sapply(expr2_df_cent_mva[,4:48],sd)
+```
+Standardizing Variables to Variance 1 and mean 0 using scale
+Should not include vDNA or vRNA
+```{r}
+standardisedconcentrations <- as.data.frame(scale(expr2_df_cent_mva[,c(4:26,28:45, 47:48)]))
+sapply(standardisedconcentrations,mean)
+sapply(standardisedconcentrations,sd)
+```
+
+Try LDA. Note only using CN2 to avoid collinear
+Impt: It doesn’t matter whether the input variables for linear discriminant analysis are standardised or not, unlike for principal components analysis in which it is often necessary to standardise the input variables. However, using standardised variables in linear discriminant analysis makes it easier to interpret the loadings in a linear discriminant function.
+
+```{r, fig.width=5, fig.height=5}
+require(MASS)
+CN2.lda <- MASS::lda(standardisedconcentrations[,c(15:43)], grouping = expr2_df_cent_mva$Patients)
+CN2.lda.values <- predict(CN2.lda, standardisedconcentrations[,c(15:43)])
+# Proportion of trace is how much each % separation achieved by each LD
+CN2.lda
+ldahist(data = CN2.lda.values$x[,1], g=expr2_df_cent_mva$Patients)
+ldahist(data = CN2.lda.values$x[,2], g=expr2_df_cent_mva$Patients)
+ldahist(data = CN2.lda.values$x[,3], g=expr2_df_cent_mva$Patients)
+ldahist(data = CN2.lda.values$x[,4], g=expr2_df_cent_mva$Patients)
+```
+Scatterplots of the Discriminant Functions
+We can obtain a scatterplot of the best two discriminant functions, with the data points labelled by cultivar, by typing:
+LD1 + LD2 = ~76.8% separation WITHOUT vDNA or vRNA!
+```{r}
+plot(CN2.lda.values$x[,1],CN2.lda.values$x[,2]) # make a scatterplot
+text(CN2.lda.values$x[,1],CN2.lda.values$x[,2],expr2_df_cent_mva$Patients,cex=0.7,pos=4,col="red") # add labels
+
+```
+We can separate out the infected (1, 2, 5, 6) vs uninfected animals (3, 4)!!
+## Prettier LDA plot in ggplot
+## NOTE WE FLIP LD1 
+```{r}
+lda_df = data.frame(LD1 = CN2.lda.values$x[,1], LD2 = CN2.lda.values$x[,2], Animals = as.factor(expr2_df_cent_mva$Patients), Infection = expr2_df_cent_mva$Groups)
+lda_df$Infection[lda_df$Infection == 0] = "Uninfected Animal"
+lda_df$Infection[lda_df$Infection == 1] = "Infected Animal"
+lda_df$Infection = factor(lda_df$Infection, levels = c("Infected Animal", "Uninfected Animal"))
+lda_df$Animals = factor(lda_df$Animals, levels = c(1,2,5,6,3,4))
+## NOTE WE ARE FLIPPING THE LD1
+lda_df$LD1 = lda_df$LD1 * -1
+
+library(ggpubr)
+
+# By animal. NOTE Animal 6 is actually acutely infected!
+plot1 <- ggplot(lda_df, aes(x = LD1, y = LD2, color = Animals)) + 
+  geom_point() + theme_bw() + ggtitle("Linear Discriminant Analysis")
+
+dens1 <- ggplot(lda_df, aes(x = LD1, fill = Animals)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none")
+
+dens2 <- ggplot(lda_df, aes(x = LD2, fill = Animals)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none") + 
+  coord_flip()
+
+dens1 + plot_spacer() + plot1 + dens2 + 
+  plot_layout(ncol = 2, nrow = 2, widths = c(4, 1), heights = c(1, 4))
+# ggsave("PaperPlots/LDAplot_ByAnimal.svg")
+
+
+## By SIV infection 
+plot1 <- ggplot(lda_df, aes(x = LD1, y = LD2, color = Infection)) + 
+  geom_point() + theme_bw() + ggtitle("Linear Discriminant Analysis")
+
+dens1 <- ggplot(lda_df, aes(x = LD1, fill = Infection)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none")
+
+dens2 <- ggplot(lda_df, aes(x = LD2, fill = Infection)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none") + 
+  coord_flip()
+
+dens1 + plot_spacer() + plot1 + dens2 + 
+  plot_layout(ncol = 2, nrow = 2, widths = c(4, 1), heights = c(1, 4))
+# ggsave("PaperPlots/LDAplot_ByInfection.svg")
+
+
+```
+
+1. Find what determines the LD1 LD2 loadings
+Loadings are stored under: CN2.lda$scaling
+Plot a ranked plot for each scaling from positive to negative
+```{r}
+# Try for first LD NOTE * -1 to flip the axis
+toplot = as.data.frame(CN2.lda$scaling[,1])*-1
+colnames(toplot) = "LD1"
+toplot$CN2 = rownames(toplot)
+toplot$direction = factor(sign(toplot$LD1), levels = c(-1, 1))
+# Order df3 by frequency
+# toplot$absval = abs(toplot$LD1)
+toplot$CN2 = factor(toplot$CN2 , levels = toplot$CN2[order((toplot$LD1), decreasing = T)])
+
+
+ggplot(toplot, aes(x = CN2, y = LD1, fill = direction)) + geom_bar(stat = "identity", color = "black") + labs(x = "Variables", y = "Linear Discriminant Loading 1",title = "LD1 Rank Plot") + theme_bw()  + theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + scale_fill_brewer(palette="Dark2", labels = c("Negative", "Positive"), name = "Direction")
+
+# ggsave("PaperPlots/LDA1_FeatureRankPlot.svg")
+
+```
+```{r}
+# Try for second LD
+toplot = as.data.frame(CN2.lda$scaling[,2])
+colnames(toplot) = "LD2"
+toplot$CN2 = rownames(toplot)
+toplot$direction = as.factor(sign(toplot$LD2))
+# Order df3 by frequency
+toplot$absval = abs(toplot$LD2)
+toplot$CN2 = factor(toplot$CN2 , levels = toplot$CN2[order((toplot$LD2), decreasing = T)])
+
+
+ggplot(toplot, aes(x = CN2, y = LD2, fill = direction)) + geom_bar(stat = "identity", color = "black") + labs(x = "Variables", y = "Linear Discriminant Loading 1",title = "LD2 Rank Plot") + theme_bw()  + theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) + scale_fill_brewer(palette="Dark2", labels = c("Negative", "Positive"), name = "Direction")
+
+# ggsave("PaperPlots/LDA2_FeatureRankPlot.svg")
+
+```
+
+# Try LDA on marker and CN1
+```{r, fig.width=5, fig.height=5}
+require(MASS)
+# Includes markers, CN1 counts and CN2
+expr2_df_cent_mva = expr2_df_cent[,c(4,5, 67, 68,66,51, 12, 14:43, 52:65, 70:100)]
+# expr2_df_cent_mva
+# # Summarize mean per celltype for Marker
+# expr2_df_cent_mva = expr2_df_cent_mva %>% group_by(Groups, Patients, cell_type_for_CN) %>%
+#   summarise(across(Vimentin:CD45_20_CN2, mean))
+
+# Summarize mean per CN for CN2/2
+expr2_df_cent_mva = expr2_df_cent_mva %>% group_by(Groups, Patients, neighborhood20) %>%
+  summarise(across(Vimentin:CD45_20_CN2, mean))
+
+
+# Remove vDNA and vRNA columns
+standardisedconcentrations <- as.data.frame(scale(expr2_df_cent_mva[,c(4:12,14:31, 33:57, 59:76, 78:79)]))
+sapply(standardisedconcentrations,mean)
+sapply(standardisedconcentrations,sd)
+
+# LDA on markers
+# marker.lda <- MASS::lda(standardisedconcentrations[,c(1:29)], grouping = expr2_df_cent_mva$Patients)
+# marker.lda.values <- predict(marker.lda, standardisedconcentrations[,c(1:29)])
+# LDA on CN1s
+marker.lda <- MASS::lda(standardisedconcentrations[,c(30:43)], grouping = expr2_df_cent_mva$Patients)
+marker.lda.values <- predict(marker.lda, standardisedconcentrations[,c(30:43)])
+
+
+# Proportion of trace is how much each % separation achieved by each LD
+marker.lda
+ldahist(data = marker.lda.values$x[,1], g=expr2_df_cent_mva$Patients)
+ldahist(data = marker.lda.values$x[,2], g=expr2_df_cent_mva$Patients)
+ldahist(data = marker.lda.values$x[,3], g=expr2_df_cent_mva$Patients)
+ldahist(data = marker.lda.values$x[,4], g=expr2_df_cent_mva$Patients)
+plot(marker.lda.values$x[,1],marker.lda.values$x[,2]) # make a scatterplot
+text(marker.lda.values$x[,1],marker.lda.values$x[,2],expr2_df_cent_mva$Patients,cex=0.7,pos=4,col="red") # add labels
+
+# CEll Type for Markers
+# lda_df = data.frame(LD1 = marker.lda.values$x[,1], LD2 = marker.lda.values$x[,2], Animals = as.factor(expr2_df_cent_mva$Patients), Infection = expr2_df_cent_mva$Groups, CellType = as.factor(expr2_df_cent_mva$cell_type_for_CN))
+
+lda_df = data.frame(LD1 = marker.lda.values$x[,1], LD2 = marker.lda.values$x[,2], Animals = as.factor(expr2_df_cent_mva$Patients), Infection = expr2_df_cent_mva$Groups, CN = as.factor(expr2_df_cent_mva$neighborhood20))
+
+lda_df$Infection[lda_df$Infection == 0] = "Uninfected Animal"
+lda_df$Infection[lda_df$Infection == 1] = "Infected Animal"
+lda_df$Infection = factor(lda_df$Infection, levels = c("Infected Animal", "Uninfected Animal"))
+lda_df$Animals = factor(lda_df$Animals, levels = c(1,2,5,6,3,4))
+# ## NOTE WE ARE FLIPPING THE LD1
+lda_df$LD1 = lda_df$LD1 * -1
+
+library(ggpubr)
+
+# By animal. NOTE Animal 6 is actually acutely infected!
+plot1 <- ggplot(lda_df, aes(x = LD1, y = LD2, color = Animals)) + 
+  geom_point() + theme_bw() + ggtitle("Linear Discriminant Analysis by CN per Animal only")
+
+dens1 <- ggplot(lda_df, aes(x = LD1, fill = Animals)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none")
+
+dens2 <- ggplot(lda_df, aes(x = LD2, fill = Animals)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none") + 
+  coord_flip()
+
+dens1 + plot_spacer() + plot1 + dens2 + 
+  plot_layout(ncol = 2, nrow = 2, widths = c(4, 1), heights = c(1, 4))
+ggsave("PaperPlots/LDAplot_ByAnimal_CN1Only.svg")
+
+
+## By SIV infection 
+plot1 <- ggplot(lda_df, aes(x = LD1, y = LD2, color = Infection)) + 
+  geom_point() + theme_bw() + ggtitle("Linear Discriminant Analysis by CN per Infection only")
+
+dens1 <- ggplot(lda_df, aes(x = LD1, fill = Infection)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none")
+
+dens2 <- ggplot(lda_df, aes(x = LD2, fill = Infection)) + 
+  geom_density(alpha = 0.4) + 
+  theme_void() + 
+  theme(legend.position = "none") + 
+  coord_flip()
+
+dens1 + plot_spacer() + plot1 + dens2 + 
+  plot_layout(ncol = 2, nrow = 2, widths = c(4, 1), heights = c(1, 4))
+
+ggsave("PaperPlots/LDAplot_ByInfection_CN1Only.svg")
+
+```
+
+## Way forward Random Forest:
+Find stratifying features between Latent and Lytic
+Use a random forest
+```{r}
+trainingdata = infected_cells_df[infected_cells_df$latency_status %in% c("Latent", "Active"),]
+trainingdata$latency_status = factor(trainingdata$latency_status, levels = c("Latent", "Active"))
+# Use only cell markers
+trainingdata_markers = trainingdata[,c(12, 14:21, 23:40, 42:43, 69)]
+```
+
+## Try Han's function
+Input dataframe is matrix with rows for each patient/donor. Columns are features. First column is the outcome
+```{r}
+# Rework trainingdata_CN2s a little
+# latency_status becomes Shedding (factor with levels 0 and 1)
+trainingdata_CN2s = trainingdata[,c(69, 70:78, 80:97,99:100)]
+colnames(trainingdata_CN2s)[colnames(trainingdata_CN2s) %in% "latency_status"] = "Shedding"
+trainingdata_CN2s$Shedding = as.character(trainingdata_CN2s$Shedding)
+trainingdata_CN2s$Shedding[trainingdata_CN2s$Shedding %in% "Latent"] = 0
+trainingdata_CN2s$Shedding[trainingdata_CN2s$Shedding %in% "Active"] = 1
+trainingdata_CN2s$Shedding = factor(trainingdata_CN2s$Shedding, levels = c(0, 1))
+
+rf_out = iterate_random_forest(df_input = trainingdata_CN2s, tuneLength = 50)
+```
+
+```{r}
+rf_out$pval_plot
+rf_out$model_prediction_boxplot
+rf_out$roc_plot
+```
+Write a loop to go through markers, CNs and CN2s
+TRY: Adding cell types
+
+```{r}
+# No NFkB
+ran_f_types_noNF = list(Markers = c(69, 12, 14:16, 18:21, 23:40, 42:43),
+                   CNs = c(69, 52:66),
+                   CN2s = c(69, 70:73, 75:78, 80:97,99:100), # Originally used 69, 70:100 which included vDNA and vRNA so fail, of course it predicts reactivation...
+                   Markers_CN2s = c(69, 12, 14:16, 18:21, 23:40, 42:43, 70:73, 75:78, 80:97,99:100),
+                   Markers_CN1s = c(69, 12, 14:16, 18:21, 23:40, 42:43,52:66),
+                   CN1s_CN2s = c(69, 52:66, 70:73, 75:78, 80:97,99:100),
+                   CN_only = c(69, 66))
+                   
+
+rf_out_list = mclapply(ran_f_types_noNF, function(rf){
+  trainingdata_sub = trainingdata[,rf]
+  print(colnames(trainingdata_sub))
+  colnames(trainingdata_sub)[colnames(trainingdata_sub) %in% "latency_status"] = "Shedding"
+  trainingdata_sub$Shedding = as.character(trainingdata_sub$Shedding)
+  trainingdata_sub$Shedding[trainingdata_sub$Shedding %in% "Latent"] = 0
+  trainingdata_sub$Shedding[trainingdata_sub$Shedding %in% "Active"] = 1
+  trainingdata_sub$Shedding = factor(trainingdata_sub$Shedding, levels = c(0, 1))
+  rf_out = iterate_random_forest(df_input = trainingdata_sub, tuneLength = 20, ntree = 2000)  
+},mc.cores = 6)
+
+lapply(rf_out_list, function(rf){
+  rf$roc_plot
+})
+```
+Plotting all the AUCs together
+```{r}
+
+df_all_AUC = do.call(rbind,lapply(names(rf_out_list), function(rf){
+  df = rf_out_list[[rf]][["prediction_performance"]]
+  df$Model = rf
+  return(df)
+}))
+
+AUC_values = unlist(lapply(names(rf_out_list), function(rf){
+  paste0(rf, ": ", round(rf_out_list[[rf]][["prediction_performance_auc"]],5))
+}))
+
+df_all_AUC$Model = factor(df_all_AUC$Model, levels = names(ran_f_types))
+
+p = ggplot(df_all_AUC, aes(x = FPR, y = TPR, group = Model))
+p + geom_line(aes(color = Model), size = 0.5) + theme_bw() + 
+    geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "red",
+              alpha = 0.5,
+              size = 0.5) + ggtitle(paste(AUC_values, collapse = " ")) + scale_color_discrete(labels = AUC_values)
+  
+ggsave("PaperPlots/ROC_AUC_7Models_ntree2000_novRNAhi_noNFkB.svg")
+
+
+# 3 models
+
+df_all_AUC = do.call(rbind,lapply(names(rf_out_list)[c(1,3,7)], function(rf){
+  df = rf_out_list[[rf]][["prediction_performance"]]
+  df$Model = rf
+  return(df)
+}))
+
+AUC_values = unlist(lapply(names(rf_out_list)[c(1,3,7)], function(rf){
+  paste0(rf, ": ", round(rf_out_list[[rf]][["prediction_performance_auc"]],5))
+}))
+
+df_all_AUC$Model = factor(df_all_AUC$Model, levels = names(ran_f_types))
+
+p = ggplot(df_all_AUC, aes(x = FPR, y = TPR, group = Model))
+p + geom_line(aes(color = Model), size = 0.5) + theme_bw() + 
+    geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "red",
+              alpha = 0.5,
+              size = 0.5) + ggtitle(paste(AUC_values, collapse = " ")) + scale_color_discrete(labels = AUC_values)
+  
+ggsave("PaperPlots/ROC_AUC_3Models_ntree2000_novRNAhi_noNFkB.svg", width = 8,height = 5)
+
+```

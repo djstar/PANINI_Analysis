@@ -1,0 +1,167 @@
+For each CN, plot the Marker expression between 2 conditions for each cell type in that CN
+Facet across Markers in that CN
+
+```{r, fig.width=20, fig.height=12}
+sub_df = cbind(expr2_df_cent_CNs_text[,c(12,14:43)], expr2_df_cent_CNs_text[,c("Groups", "PointNum", "neighborhood20text", "cell_type")])
+sub_df2 = data.frame(sub_df %>% group_by(PointNum, neighborhood20text, cell_type) %>%
+  summarise(across(Vimentin:Groups, mean)))
+plot_CN_withmarkers = melt(sub_df2,
+                           id.vars = c("Groups", "neighborhood20text", "PointNum", "cell_type"),
+                           variable.name = "Marker")
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 0] = "Uninfected Animal"
+plot_CN_withmarkers$Groups[plot_CN_withmarkers$Groups == 1] = "Infected Animal"
+plot_CN_withmarkers$Groups = factor(plot_CN_withmarkers$Groups, levels = c("Infected Animal", "Uninfected Animal"))
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "neighborhood20text"] = "CN"
+
+colnames(plot_CN_withmarkers)[colnames(plot_CN_withmarkers) %in% "variable"] = "Marker"
+# Find average expression per FOV
+
+CN_marker_diff = lapply(unique(expr2_df_cent_CNs_text$neighborhood20text), function(cn){
+  sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$CN %in% cn,]
+  p = ggplot(data=sub_plotdf, aes(x=cell_type, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+    # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+    geom_point(position=position_jitterdodge(), size = 0.5)+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~Marker)
+  # compare_means(value ~ Groups, data = sub_plotdf,
+                # group.by = "Marker")
+  g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment in CN ", cn)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+# g
+  ggsave(plot = g, filename = paste0("PaperPlots/CN_perMarker_CellTypeEnrichment_", cn,".svg"), width = 40, height = 20)
+  return(g)
+})
+# 
+# lapply(CN_marker_diff, function(p){
+#   p
+# })
+```
+
+# IL10 levels from each CN
+```{r, fig.width=10, fig.height=6}
+sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$Marker %in% "IL10",]
+sub_plotdf = sub_plotdf[sub_plotdf$cell_type %in% "B",]
+
+p = ggplot(data=sub_plotdf, aes(x=cell_type, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+  # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+  geom_point(position=position_jitterdodge(), size = 0.5)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~CN)
+# compare_means(value ~ Groups, data = sub_plotdf,
+#               group.by = "cell_type")
+g = p + stat_compare_means(label = "p.signif", size = 5) + ggtitle(paste0("Enrichment in CN ", cn)) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme_bw()
+
+g
+ggsave(plot = g, filename = paste0("PaperPlots/Bcell_IL10_perCN.svg"), width = 10, height = 6)
+
+
+sub_plotdf = plot_CN_withmarkers[plot_CN_withmarkers$Marker %in% "IL10",]
+sub_plotdf = sub_plotdf[sub_plotdf$cell_type %in% "Macrophage",]
+
+p = ggplot(data=sub_plotdf, aes(x=cell_type, y=value, fill=Groups)) + geom_boxplot(outlier.shape = NA) +
+  # geom_jitter(color="black", size=0.1, alpha=1, width = 0.05, height = 0.05) +
+  geom_point(position=position_jitterdodge(), size = 0.5)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + facet_wrap(~CN)
+# compare_means(value ~ Groups, data = sub_plotdf,
+#               group.by = "cell_type")
+g = p + stat_compare_means(label = "p.signif", size = 5, method = "wilcox.test") + ggtitle(paste0("Macrophage IL10 expression per CN")) + theme_bw() + ylab("Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme_bw() + ylim(c(0,0.2))
+
+g
+ggsave(plot = g, filename = paste0("PaperPlots/Macrophage_IL10_perCN.svg"), width = 10, height = 6)
+```
+
+
+# Making segmentation maps of B cells or Macrophages with a diffusal gradient of IL10
+```{r}
+IL10_df = expr2_df_cent_CNs_text[,c(3,5,35,46:48,67)]
+macrophage_vec = IL10_df$cell_type %in% "Macrophage"
+b_vec = IL10_df$cell_type %in% "B"
+IL10_df$macrophage = as.character(macrophage_vec)
+IL10_df$b = as.character(b_vec)
+
+# for(i in unique(expr_df_anon$PointNum)){
+for(i in 1:5){
+
+testimg = make_cellcluster_layers_Noah(expr_df_anon = IL10_df[(IL10_df$PointNum == i),],
+                        newLmod = newLmodlist[[i]],
+                        plot_cluster_name = "macrophage",
+                        cell_types = c("TRUE", "FALSE"),
+                        mycolor = c("#C77CFF", "#FAFAFA"))
+display(testimg, interpolate=TRUE, method = "raster")
+}
+
+mydir = "/Users/sizunj/Nolan Lab Dropbox/Sizun Jiang/projects/DNAscope/Data/MIBI/DNAscope Manuscript Data/ConvertedToPoints/Analysis/viralMIBI/PaperPlots/"
+mclapply(sort(as.numeric(unique(IL10_df$PointNum))), function(i){
+  img_matrix = make_cellcluster_layers_Noah(expr_df_anon = IL10_df[(IL10_df$PointNum == i),],
+                      newLmod = newLmodlist[[i]],
+                      plot_cluster_name = "macrophage",
+                      cell_types = c("TRUE", "FALSE"),
+                      mycolor = c("#F781BF", "#FAFAFA"))
+    writeImage(img_matrix, files = paste0(mydir, "Macrophage.FOV",i, ".png"))
+  }, mc.cores = 4)
+
+mclapply(sort(as.numeric(unique(IL10_df$PointNum))), function(i){
+  img_matrix = make_cellcluster_layers_Noah(expr_df_anon = IL10_df[(IL10_df$PointNum == i),],
+                      newLmod = newLmodlist[[i]],
+                      plot_cluster_name = "b",
+                      cell_types = c("TRUE", "FALSE"),
+                      mycolor = c("#377EB8", "#FAFAFA"))
+    writeImage(img_matrix, files = paste0(mydir, "Bcell.FOV",i, ".png"))
+  }, mc.cores = 4)
+  
+
+```
+
+Use white to red for min/max.
+```{r}
+make_plot = function(df, fov, marker, min = 0, max = 0.2, title = fov, xmax = 1591, ymax = 1591){
+  plt = ggplot(df) + geom_point(aes_string(x = "x_cent", y = "y_cent", color = marker, alpha = 0.99), cex = 1.2, shape=16) + theme_light(base_size=20)+ coord_fixed() + xlim(0,xmax) + ylim(0,ymax)
+  plt + scale_color_gradient2(low="blue", mid="white", high = "red", space ="Lab", limits = c(min, max), na.value = NA) + scale_x_discrete(labels = NULL, breaks = NULL) + labs(x = "") +
+    scale_y_discrete(labels = NULL, breaks = NULL) + labs(y = "") + 
+      theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+    panel.grid.major = element_blank(), # get rid of major grid
+    panel.grid.minor = element_blank(), # get rid of minor grid
+    legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+    legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg,
+    panel.border = element_blank())+ theme(legend.position = "none")
+}
+
+
+for(fov in 1:20){
+  df = IL10_df[IL10_df$PointNum %in% fov,]
+  df = df[df$IL10 > 0,]
+  p = make_plot(df = df, 
+          fov = fov,
+          marker = "IL10",
+          max = 0.3)
+  ggsave(p, filename = paste0(mydir, "IL10.FOV", fov, ".png"),  bg = "transparent")
+}
+
+
+make_plot = function(df, fov, marker, min = 0, max = 0.2, title = fov, xmax = 1591, ymax = 1591){
+  plt = ggplot(df) + geom_point(aes_string(x = "x_cent", y = "y_cent", color = marker, alpha = 1), cex = 1.2, shape=16) + theme_light(base_size=20)+ coord_fixed() + xlim(0,xmax) + ylim(0,ymax)
+  plt + scale_color_gradient2(low="white", mid="white", high = "cyan", space ="Lab", limits = c(min, max), na.value = NA) + scale_x_discrete(labels = NULL, breaks = NULL) + labs(x = "") +
+    scale_y_discrete(labels = NULL, breaks = NULL) + labs(y = "") + 
+      theme(
+    panel.background = element_rect(fill = "transparent"), # bg of the panel
+    plot.background = element_rect(fill = "transparent", color = NA), # bg of the plot
+    panel.grid.major = element_blank(), # get rid of major grid
+    panel.grid.minor = element_blank(), # get rid of minor grid
+    legend.background = element_rect(fill = "transparent"), # get rid of legend bg
+    legend.box.background = element_rect(fill = "transparent"), # get rid of legend panel bg,
+    panel.border = element_blank())+ theme(legend.position = "none")
+}
+
+
+for(fov in 1:20){
+  df = IL10_df[IL10_df$PointNum %in% fov,]
+  df = df[df$IL10 > 0,]
+  p = make_plot(df = df, 
+          fov = fov,
+          marker = "IL10",
+          max = 0.2)
+  ggsave(p, filename = paste0(mydir, "IL10.Blue.FOV", fov, ".png"),  bg = "transparent")
+}
+
+
+```
+
